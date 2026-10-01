@@ -77,14 +77,5 @@ test.describe('Test Home Page', () => {
       await expect(m.english).toHaveText('English');
      
     });
- 
-    // await test.step('English top menu after switching back', async () => {
-    //   const m = menu();
-    //   await expect(m.arabic).toBeVisible();
-    //   await expect(m.events).toHaveText('Events');
-    //   await expect(m.ratings).toHaveText('Ratings');
-    //   await expect(m.help).toHaveText('Help');
-    //   await expect(m.arabic).toHaveText('عربى');
-    // });
   });
 });
