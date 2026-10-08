@@ -75,7 +75,6 @@ test.describe('Test Home Page', () => {
       await expect(m.ratings).toHaveText('التقييمات');
       await expect(m.help).toHaveText('مساعدة');
       await expect(m.english).toHaveText('English');
-     
     });
   });
 });
