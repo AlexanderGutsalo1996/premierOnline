@@ -1,26 +1,34 @@
-﻿import { test } from '@playwright/test';
+﻿
+import { test } from '@playwright/test';
 import { Register } from '../pages/Register';
-import { getRegistrationData } from '../Data/registration';
-
-
+import { generateRegistrationData } from '../Data/registration';
 
 test.describe('Registration page', () => {
-    let register: Register;
+  let register: Register;
 
-    test.beforeEach(async ({ page }) => {
-        register = new Register(page);
-        await register.openRegisterPage();
+  test.beforeEach(async ({ page }) => {
+    register = new Register(page);
+    await register.openRegisterPage();
+  });
+
+  test('check the registration form elements', async () => {
+    await test.step('Verify registration form elements', async () => {
+      await register.checkRegistrationForm();
+    });
+  });
+
+  test('fill the registration form with generated data', async () => {
+    const data = generateRegistrationData();
+
+    await test.step('Fill registration form', async () => {
+      await register.fillRegistrationForm(data);
     });
 
-    test('check the registration form elements', async () => {
-        await register.checkRegistrationForm();
+    await test.step('Verify entered registration data', async () => {
+      await register.checkRegistrationData(data);
     });
 
-    test('fill the registration form with local environment data', async () => {
-        const data = getRegistrationData();
-        await register.fillRegistrationForm(data);
-        await register.checkRegistrationData(data);
-        // Account creation requires reCAPTCHA; this test verifies form entry only.
-    });
+    // Account creation requires reCAPTCHA.
+    // This test verifies form entry only.
+  });
 });
-

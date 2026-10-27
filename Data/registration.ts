@@ -1,19 +1,22 @@
-﻿import type { RegistrationData } from '../pages/Register';
+﻿
+import { randomUUID } from "node:crypto";
+import type { RegistrationData } from "../pages/Register";
 
-function requiredEnv(name: string): string {
-    const value = process.env[name];
-    if (!value?.trim()) {
-        throw new Error(`Missing environment variable ${name}. Set it in .env.local or the process environment.`);
-    }
-    return value;
-}
+export function generateRegistrationData(
+  overrides: Partial<RegistrationData> = {}
+): RegistrationData {
+  const uniqueId = randomUUID();
 
-export function getRegistrationData(): RegistrationData {
-    return {
-        email: requiredEnv('REGISTRATION_EMAIL'),
-        firstName: requiredEnv('REGISTRATION_FIRST_NAME'),
-        lastName: requiredEnv('REGISTRATION_LAST_NAME'),
-        password: requiredEnv('REGISTRATION_PASSWORD'),
-        repeatPassword: requiredEnv('REGISTRATION_REPEAT_PASSWORD'),
-    };
+  const defaultData: RegistrationData = {
+    email: `test-${uniqueId}@example.com`,
+    firstName: "Test",
+    lastName: "User",
+    password: "TestPass123!",
+    repeatPassword: "TestPass123!",
+  };
+
+  return {
+    ...defaultData,
+    ...overrides,
+  };
 }
