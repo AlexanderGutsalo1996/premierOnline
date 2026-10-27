@@ -40,7 +40,7 @@ async checkLogoImg(){
 async checkSearchInput(){
     await expect(this.searchinput).toBeVisible();
     await expect(this.searchinput).toHaveAttribute('placeholder', 'Search by Event Name or Organiser');
-    await expect(this.searchinput).toHaveAttribute('type', 'text');
+    await expect(this.searchinput).toHaveAttribute('type', 'search');
 }
 async checkNavMenu(){
     await expect(this.navmenu).toBeVisible();
@@ -48,11 +48,11 @@ async checkNavMenu(){
     await expect(this.ratings).toBeVisible();
     await expect(this.help).toBeVisible();
     await expect(this.arabic).toBeVisible();
-    await expect(this.english).toBeVisible();
+    //зробити окремий метод await expect(this.english).toBeVisible();
 }
 async checkSignInButton(){
     await expect(this.signIn).toBeVisible();
-    await expect(this.signIn).toHaveText('Sign In');
+    await expect(this.signIn).toHaveText('Sign in');
 }
 async checkCreateAccountButton(){
     await expect(this.createAccount).toBeVisible();

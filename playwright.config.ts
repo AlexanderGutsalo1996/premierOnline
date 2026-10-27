@@ -1,12 +1,13 @@
-import { defineConfig, devices } from '@playwright/test';
+﻿import { defineConfig, devices } from '@playwright/test';
 
-/**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { loadEnvFile } from 'node:process';
+
+const localEnvPath = resolve(__dirname, '.env.local');
+if (existsSync(localEnvPath)) {
+  loadEnvFile(localEnvPath);
+}
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -77,3 +78,4 @@ export default defineConfig({
   //   reuseExistingServer: !process.env.CI,
   // },
 });
+
