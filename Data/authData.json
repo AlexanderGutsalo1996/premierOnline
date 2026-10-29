@@ -1,0 +1,14 @@
+{
+    "valid": {
+        "email": "xnderfoxxx@gmail.com",
+        "password": "XvsZBc@XODZ,aa7A"
+    },
+    "invalid": {
+        "email": "invalid-user@example.com",
+        "password": "WrongPassword123!"
+    },
+    "form": {
+        "email": "test@example.com",
+        "password": "TestPass123!"
+    }
+}
