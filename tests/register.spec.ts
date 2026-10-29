@@ -1,13 +1,13 @@
 ﻿
 import { test } from '@playwright/test';
-import { Register } from '../pages/Register';
+import { RegisterPage } from '../pages/RegistePage';
 import { generateRegistrationData } from '../Data/registration';
 
 test.describe('Registration page', () => {
-  let register: Register;
+  let register: RegisterPage;
 
   test.beforeEach(async ({ page }) => {
-    register = new Register(page);
+    register = new RegisterPage(page);
     await register.openRegisterPage();
   });
 

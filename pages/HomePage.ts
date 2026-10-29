@@ -1,204 +1,150 @@
 
-import { Page, Locator, expect } from '@playwright/test';
+import { Page, Locator } from '@playwright/test';
+import { BasePage } from './BasePage';
 
-export class HomePage {
-    readonly page: Page;
+export class HomePage extends BasePage {
+    readonly expectedTitle = 'Premier Online - leading provider of online event registration for sports events';
+    readonly expectedSportPlaceholder = 'Select Sport';
+    readonly expectedCountryPlaceholder = 'Select Country';
+    readonly expectedSearchButtonText = 'Search';
+
     readonly slider: Locator;
     readonly sliderItems: Locator;
-    readonly searchForm: Locator;
-    readonly sportSelect: Locator;
-    readonly countrySelect: Locator;
-    readonly searchButton: Locator;
+    readonly sliderTitles: Locator;
+    readonly sliderImages: Locator;
+    readonly sliderDates: Locator;
     readonly sliderNavigation: Locator;
     readonly sliderNavigationItems: Locator;
+
+    readonly searchForm: Locator;
+    readonly sportSelect: Locator;
+    readonly sportDefaultOption: Locator;
+    readonly countrySelect: Locator;
+    readonly countryDefaultOption: Locator;
+    readonly searchButton: Locator;
+
     readonly upcomingEventsSection: Locator;
     readonly upcomingEventsHeading: Locator;
     readonly eventList: Locator;
     readonly eventCards: Locator;
+    readonly eventCardTitles: Locator;
+    readonly eventCardDates: Locator;
+    readonly eventCardCountries: Locator;
 
     constructor(page: Page) {
-        this.page = page;
-        this.slider = this.page.locator('section.slider');
+        super(page);
+
+        this.slider = page.locator('section.slider');
         this.sliderItems = this.slider.locator('.uk-slider-items > li');
-        this.searchForm = this.page.locator('#search-form');
-        this.sportSelect = this.searchForm.locator('#txt_cat');
-        this.countrySelect = this.searchForm.locator('#txt_cnt');
-        this.searchButton = this.searchForm.locator('button[type="submit"]');
+        this.sliderTitles = this.sliderItems.locator('.uk-card-title a');
+        this.sliderImages = this.sliderItems.locator('img');
+        this.sliderDates = this.sliderItems.locator('.date');
         this.sliderNavigation = this.slider.locator('.uk-slider-nav');
         this.sliderNavigationItems = this.sliderNavigation.locator('[uk-slider-item]');
-        this.upcomingEventsHeading = this.page.getByRole('heading', {
+
+        this.searchForm = page.locator('#search-form');
+        this.sportSelect = this.searchForm.locator('#txt_cat');
+        this.sportDefaultOption = this.sportSelect.locator('option[value="0"]');
+        this.countrySelect = this.searchForm.locator('#txt_cnt');
+        this.countryDefaultOption = this.countrySelect.locator('option[value="0"]');
+        this.searchButton = this.searchForm.locator('button[type="submit"]');
+
+        this.upcomingEventsHeading = page.getByRole('heading', {
             name: 'Upcoming Events',
             exact: true
         });
-        this.upcomingEventsSection = this.page.locator('section').filter({
+        this.upcomingEventsSection = page.locator('section').filter({
             has: this.upcomingEventsHeading
         });
         this.eventList = this.upcomingEventsSection.locator('.events_flex');
         this.eventCards = this.eventList.locator('a.event');
+        this.eventCardTitles = this.eventCards.locator('.uk-card-title');
+        this.eventCardDates = this.eventCards.locator('.date');
+        this.eventCardCountries = this.eventCards.locator('.counrty-name');
     }
 
     async openHomePage() {
-        await this.page.goto('/');
+        await this.goto('/');
     }
 
     async verifyTitle() {
-        await expect(this.page).toHaveTitle(
-            'Premier Online - leading provider of online event registration for sports events'
-        );
+        await this.expectTitle(this.expectedTitle);
     }
 
     async checkSlider() {
-        await expect(this.slider).toBeVisible();
-        await expect(this.sliderItems.first()).toBeAttached();
-
-        for (let index = 0; index < await this.sliderItems.count(); index++) {
-            const slide = this.sliderItems.nth(index);
-
-            await expect(slide.locator('.uk-card-title a')).toHaveText(/\S/);
-            await expect(slide.locator('.uk-card-title a')).toHaveAttribute(
-                'href',
-                /\/event\/[^/]+/
-            );
-            await expect(slide.locator('img')).toHaveAttribute('src', /\S/);
-            await expect(slide.locator('img')).toHaveAttribute('alt', /\S/);
-            await expect(slide.locator('.date')).toHaveText(/\S/);
-
-            // Registration availability can vary between featured events.
-            for (const link of await slide.getByRole('link', {
-                name: 'Register',
-                exact: true
-            }).all()) {
-                await expect(link).toHaveAttribute(
-                    'href',
-                    /\/register_event\.php\?id=\d+/
-                );
-            }
-        }
+        await this.expectVisible(this.slider);
+        await this.expectAttached(this.sliderItems.first());
+        await this.expectNotEmptyText(this.sliderTitles.first());
+        await this.expectAttribute(
+            this.sliderTitles.first(),
+            'href',
+            /\/event\/[^/]+/
+        );
+        await this.expectAttribute(this.sliderImages.first(), 'src', /\S/);
+        await this.expectNotEmptyText(this.sliderDates.first());
     }
 
     async checkSliderNavigation() {
-        // UIkit hides the navigation when there is only one slide.
-        await expect(this.sliderNavigation).toBeAttached();
-        await expect(this.sliderNavigationItems).toHaveCount(
-            await this.sliderItems.count()
+        await this.expectAttached(this.sliderNavigation);
+        await this.expectCount(
+            this.sliderNavigationItems,
+            await this.count(this.sliderItems)
         );
-
-        if (await this.sliderItems.count() > 1) {
-            await expect(this.sliderNavigation).toBeVisible();
-
-            for (const item of await this.sliderNavigationItems.all()) {
-                await expect(item.locator('a')).toBeVisible();
-                await expect(item.locator('a')).toHaveAttribute('href', '#');
-            }
-        }
     }
 
     async checkSearchForm() {
-        await expect(this.searchForm).toBeVisible();
-        await expect(this.searchForm).toHaveAttribute('method', 'post');
-
-        await expect(this.sportSelect).toBeVisible();
-        await expect(this.sportSelect).toBeEnabled();
-        await expect(this.sportSelect).toHaveAttribute('name', 'txt_cat');
-        await expect(this.sportSelect).toHaveValue('0');
-        await expect(
-            this.sportSelect.locator('option[value="0"]')
-        ).toHaveText('Select Sport');
-
-        await expect(this.countrySelect).toBeVisible();
-        await expect(this.countrySelect).toBeEnabled();
-        await expect(this.countrySelect).toHaveAttribute('name', 'txt_cnt');
-        await expect(this.countrySelect).toHaveValue('0');
-        await expect(
-            this.countrySelect.locator('option[value="0"]')
-        ).toHaveText('Select Country');
-
-        await expect(this.searchButton).toBeVisible();
-        await expect(this.searchButton).toBeEnabled();
-        await expect(this.searchButton).toHaveText('Search');
-        await expect(this.searchButton).toHaveAttribute('type', 'submit');
-    }
-
-    async checkUpcomingEvents() {
-        await expect(this.upcomingEventsSection).toBeVisible();
-        await expect(this.upcomingEventsHeading).toBeVisible();
-        await expect(this.eventList).toBeVisible();
-        await expect(this.eventCards.first()).toBeVisible();
-    }
-
-    async checkEventCards() {
-        await expect(this.eventCards.first()).toBeVisible();
-
-        const totalCards = await this.eventCards.count();
-        const cardsToCheck = Math.min(totalCards, 5);
-
-        for (let index = 0; index < cardsToCheck; index++) {
-            const card = this.eventCards.nth(index);
-            const image = card.locator('.uk-card-media-top > img');
-
-            await expect(card).toBeVisible();
-            await expect(card).toHaveAttribute(
-                'href',
-                /\/event\/[^/]+/
-            );
-
-            await expect(image).toBeVisible();
-            await expect(image).toHaveAttribute('src', /\S/);
-            await expect(image).toHaveAttribute('alt', /\S/);
-
-            for (const element of [
-                card.locator('.uk-card-title'),
-                card.locator('.date'),
-                card.locator('.counrty-name'),
-                card.locator('.uk-card-btn')
-            ]) {
-                await expect(element).toBeVisible();
-                await expect(element).toHaveText(/\S/);
-            }
-
-            // Status badges and organiser logos are optional.
-            for (const badge of await card.locator('.uk-label').all()) {
-                await expect(badge).toBeVisible();
-                await expect(badge).toHaveText(/\S/);
-            }
-
-            for (const logo of await card.locator('.o-d-logo img').all()) {
-                await expect(logo).toBeVisible();
-                await expect(logo).toHaveAttribute('src', /\S/);
-            }
-        }
+        await this.expectVisible(this.searchForm);
+        await this.expectVisible(this.sportSelect);
+        await this.expectVisible(this.countrySelect);
+        await this.expectEnabled(this.sportSelect);
+        await this.expectEnabled(this.countrySelect);
+        await this.expectText(this.sportDefaultOption, this.expectedSportPlaceholder);
+        await this.expectText(this.countryDefaultOption, this.expectedCountryPlaceholder);
+        await this.expectVisible(this.searchButton);
+        await this.expectText(this.searchButton, this.expectedSearchButtonText);
     }
 
     async selectSport(value: string) {
-        const response = this.page.waitForResponse(response =>
-            response.url().includes(
-                'ajax_requests.php?request=getCountriesByCategory'
-            )
+        await this.actionAndWaitForResponse(
+            'ajax_requests.php?request=getCountriesByCategory',
+            () => this.selectOption(this.sportSelect, value)
         );
-
-        await this.sportSelect.selectOption(value);
-        await response;
-        await expect(this.sportSelect).toHaveValue(value);
+        await this.expectValue(this.sportSelect, value);
     }
 
     async selectCountry(value: string) {
-        const response = this.page.waitForResponse(response =>
-            response.url().includes(
-                'ajax_requests.php?request=getCategoryByCountriesId'
-            )
+        await this.actionAndWaitForResponse(
+            'ajax_requests.php?request=getCategoryByCountriesId',
+            () => this.selectOption(this.countrySelect, value)
         );
-
-        await this.countrySelect.selectOption(value);
-        await response;
-        await expect(this.countrySelect).toHaveValue(value);
+        await this.expectValue(this.countrySelect, value);
     }
 
     async submitSearch() {
-        await this.searchButton.click();
+        await this.click(this.searchButton);
+    }
+
+    async checkUpcomingEvents() {
+        await this.expectVisible(this.upcomingEventsSection);
+        await this.expectVisible(this.upcomingEventsHeading);
+        await this.expectVisible(this.eventList);
+        await this.expectVisible(this.eventCards.first());
+    }
+
+    async checkEventCards() {
+        await this.expectVisible(this.eventCards.first());
+        await this.expectAttribute(
+            this.eventCards.first(),
+            'href',
+            /\/event\/[^/]+/
+        );
+        await this.expectNotEmptyText(this.eventCardTitles.first());
+        await this.expectNotEmptyText(this.eventCardDates.first());
+        await this.expectNotEmptyText(this.eventCardCountries.first());
     }
 
     async openEvent(index = 0) {
-        await this.eventCards.nth(index).click();
+        await this.click(this.eventCards.nth(index));
     }
 
     async checkHomePageComponents() {

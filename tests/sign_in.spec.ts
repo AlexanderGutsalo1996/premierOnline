@@ -70,11 +70,7 @@ test.describe('Sign In page', () => {
         });
 
         await test.step('Verify login error message', async () => {
-            await expect(
-                page.getByText('Sorry, you were not recognized', {
-                    exact: false
-                })
-            ).toBeVisible();
+            await signIn.expectVisible(signIn.loginErrorMessage);
         });
     });
 
@@ -102,11 +98,7 @@ test.describe('Sign In page', () => {
         });
 
         await test.step('Verify successful authentication', async () => {
-            await expect(
-                page.getByText('Sorry, you were not recognized', {
-                    exact: false
-                })
-            ).not.toBeVisible();
+            await signIn.expectHidden(signIn.loginErrorMessage);
 
             await expect(page).not.toHaveURL(/\/action\/dologin/);
         });

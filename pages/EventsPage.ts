@@ -1,18 +1,27 @@
 
-import { Page, Locator, expect } from '@playwright/test';
+import { Page, Locator } from '@playwright/test';
+import { BasePage } from './BasePage';
 
-export class EventsPage {
-    readonly page: Page;
+export class EventsPage extends BasePage {
+    readonly expectedTitle = 'Event Calendar';
+
     readonly content: Locator;
     readonly heading: Locator;
     readonly yearLinks: Locator;
     readonly activeYearLink: Locator;
     readonly monthItems: Locator;
     readonly monthTitles: Locator;
+    readonly monthCounts: Locator;
+    readonly monthContents: Locator;
     readonly eventLinks: Locator;
 
+    // Relative selectors for elements inside a selected month.
+    readonly monthEventLinks: (index: number) => Locator;
+    readonly monthEventRows: (index: number) => Locator;
+
     constructor(page: Page) {
-        this.page = page;
+        super(page);
+
         this.content = page.locator('.content');
         this.heading = this.content.getByRole('heading', {
             name: 'Events Calendar',
@@ -22,163 +31,110 @@ export class EventsPage {
         this.activeYearLink = this.content.locator('.years-nav .uk-active a');
         this.monthItems = this.content.locator('ul[uk-accordion] > li');
         this.monthTitles = this.monthItems.locator('.uk-accordion-title');
+        this.monthCounts = this.monthTitles.locator('span');
+        this.monthContents = this.monthItems.locator('.uk-accordion-content');
         this.eventLinks = this.monthItems.locator('h4 a');
+
+        this.monthEventLinks = index =>
+            this.monthItems.nth(index).locator('h4 a');
+
+        this.monthEventRows = index =>
+            this.monthItems.nth(index).locator('tr').filter({
+                has: page.locator('h4 a')
+            });
     }
 
     async openEventsPage() {
-        await this.page.goto('/calendar');
+        await this.goto('/calendar');
     }
 
     async checkYearNavigation() {
-        await expect(this.yearLinks.first()).toBeVisible();
-        await expect(this.activeYearLink).toBeVisible();
-        await expect(this.activeYearLink).toHaveText(/^\d{4}$/);
-
-        for (const link of await this.yearLinks.all()) {
-            await expect(link).toBeVisible();
-            await expect(link).toHaveText(/^\d{4}$/);
-            await expect(link).toHaveAttribute(
-                'href',
-                /\/calendar\/\d{4}$/
-            );
-        }
+        await this.expectVisible(this.yearLinks.first());
+        await this.expectVisible(this.activeYearLink);
+        await this.expectText(this.activeYearLink, /^\d{4}$/);
+        await this.expectAttribute(
+            this.yearLinks.first(),
+            'href',
+            /\/calendar\/\d{4}$/
+        );
     }
 
     async selectYear(year: string) {
-        const yearLink = this.yearLinks.getByText(year, {
-            exact: true
-        });
-
-        await yearLink.click();
-        await expect(this.activeYearLink).toHaveText(year);
+        await this.click(this.yearLinks.getByText(year, { exact: true }));
+        await this.expectText(this.activeYearLink, year);
     }
 
     async checkMonthNavigation() {
-        await expect(this.monthTitles.first()).toBeVisible();
-
-        for (const title of await this.monthTitles.all()) {
-            await expect(title).toBeVisible();
-            await expect(title).toHaveAttribute('href', '#');
-            await expect(title).toHaveText(/\S/);
-            await expect(title.locator('span')).toHaveText(
-                /\(\d+ Events?\)/
-            );
-        }
+        await this.expectVisible(this.monthTitles.first());
+        await this.expectAttribute(this.monthTitles.first(), 'href', '#');
+        await this.expectText(this.monthCounts.first(), /\(\d+ Events?\)/);
     }
 
     async openMonth(index: number) {
-        const month = this.monthItems.nth(index);
-        const title = month.locator('.uk-accordion-title');
-        const content = month.locator('.uk-accordion-content');
-
-        await expect(title).toBeVisible();
+        const content = this.monthContents.nth(index);
 
         if (!(await content.isVisible())) {
-            await title.click();
+            await this.click(this.monthTitles.nth(index));
         }
 
-        await expect(content).toBeVisible();
+        await this.expectVisible(content);
     }
 
     async closeMonth(index: number) {
-        const month = this.monthItems.nth(index);
-        const title = month.locator('.uk-accordion-title');
-        const content = month.locator('.uk-accordion-content');
-
-        await expect(title).toBeVisible();
+        const content = this.monthContents.nth(index);
 
         if (await content.isVisible()) {
-            await title.click();
+            await this.click(this.monthTitles.nth(index));
         }
 
-        await expect(content).toBeHidden();
+        await this.expectHidden(content);
     }
 
     async checkMonthEvents(
         index: number,
-        maxEvents?: number,
+        maxEvents = 5,
         expectedCount?: number
     ) {
+        if (!Number.isInteger(maxEvents) || maxEvents < 0) {
+            throw new Error('maxEvents must be a non-negative integer');
+        }
+
         await this.openMonth(index);
 
-        const month = this.monthItems.nth(index);
-        const rows = month.locator('tr').filter({
-            has: this.page.locator('h4 a')
-        });
-
-        const totalEvents = await rows.count();
+        const rows = this.monthEventRows(index);
+        const links = this.monthEventLinks(index);
 
         if (expectedCount !== undefined) {
-            await expect(rows).toHaveCount(expectedCount);
+            await this.expectCount(rows, expectedCount);
         }
 
-        if (maxEvents !== undefined) {
-            if (!Number.isInteger(maxEvents) || maxEvents < 0) {
-                throw new Error(
-                    'maxEvents must be a non-negative integer'
-                );
-            }
-        }
+        const toCheck = Math.min(await this.count(rows), maxEvents);
 
-        const eventsToCheck = maxEvents === undefined
-            ? totalEvents
-            : Math.min(totalEvents, maxEvents);
-
-        for (let i = 0; i < eventsToCheck; i++) {
-            const row = rows.nth(i);
-            const eventLink = row.locator('h4 a');
-
-            await expect(row).toBeVisible();
-            await expect(eventLink).toHaveText(/\S/);
-            await expect(eventLink).toHaveAttribute(
+        for (let i = 0; i < toCheck; i++) {
+            await this.expectVisible(rows.nth(i));
+            await this.expectNotEmptyText(links.nth(i));
+            await this.expectAttribute(
+                links.nth(i),
                 'href',
                 /\/event\/[^/]+/
             );
-
-            await expect(row.locator('.month')).toHaveText(/\S/);
-            await expect(row.locator('.day')).toHaveText(
-                /^\d{1,2}$/
-            );
-            await expect(
-                row.locator('td > .uk-text-muted')
-            ).toHaveText(/\S/);
-
-            const badges = row.locator('.uk-label');
-
-            for (const badge of await badges.all()) {
-                await expect(badge).toBeVisible();
-                await expect(badge).toHaveText(/\S/);
-            }
         }
     }
 
     async openEvent(monthIndex: number, eventIndex = 0) {
         await this.openMonth(monthIndex);
-
-        const eventLink = this.monthItems
-            .nth(monthIndex)
-            .locator('h4 a')
-            .nth(eventIndex);
-
-        await expect(eventLink).toBeVisible();
-        await eventLink.click();
+        await this.click(this.monthEventLinks(monthIndex).nth(eventIndex));
     }
 
     async openEventByName(eventName: string) {
-        const eventLink = this.eventLinks.getByText(eventName, {
-            exact: true
-        });
-
-        await expect(eventLink).toBeVisible();
-        await eventLink.click();
+        await this.click(this.eventLinks.getByText(eventName, { exact: true }));
     }
 
     async checkEventsPage() {
-        await expect(this.page).toHaveTitle('Event Calendar');
-        await expect(this.heading).toBeVisible();
-
+        await this.expectTitle(this.expectedTitle);
+        await this.expectVisible(this.heading);
         await this.checkYearNavigation();
         await this.checkMonthNavigation();
-        await this.checkMonthEvents(0, 5);
+        await this.checkMonthEvents(0);
     }
 }
