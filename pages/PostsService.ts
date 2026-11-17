@@ -12,6 +12,8 @@ type PostData = {
 type ListPostsParams = {
   status?: string;
   per_page?: number;
+  orderby?: 'id' | 'date' | 'title';
+  order?: 'asc' | 'desc';
 };
 
 // Об’єднує запити до WordPress API для роботи з постами.
