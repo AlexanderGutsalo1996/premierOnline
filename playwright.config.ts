@@ -27,7 +27,8 @@ export default defineConfig({
   reporter: [
   ['list'],
   ['html', { open: 'never' }],
-  ['allure-playwright', { resultsDir: 'allure-results' }]
+  ['allure-playwright', { resultsDir: 'allure-results' }],
+  ...(process.env.CI ? [['json', { outputFile: 'playwright-summary.json' }] as ['json', { outputFile: string }]] : [])
 ],
 globalTeardown: process.env.CI ? undefined : './allure-teardown.ts',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
