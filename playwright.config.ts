@@ -29,7 +29,7 @@ export default defineConfig({
   ['html', { open: 'never' }],
   ['allure-playwright', { resultsDir: 'allure-results' }]
 ],
-globalTeardown: './allure-teardown.ts',
+globalTeardown: process.env.CI ? undefined : './allure-teardown.ts',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
