@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { test as base, expect } from '@playwright/test';
 import { PostsService } from '../pages/PostsService';
 const BASE_URL = 'https://dev.emeli.in.ua/wp-json/wp/v2';
@@ -26,21 +27,66 @@ test.describe('WordPress Posts API - CRUD Tests', () => {
     console.log('Testing API base URL:', BASE_URL);
   });
   // Перевіряє створення й публікацію поста через API.
+  // Перевіряє створення поста, новий ID та відповідність ID саме створеному посту.
   test('CREATE - Should create a new post', async ({ postsService }) => {
+    // Отримуємо останній опублікований пост перед створенням нового.
+    const previousResponse = await postsService.listPosts({ per_page: 1, orderby: 'id', order: 'desc' });
+    expect(previousResponse.status()).toBe(200);
+    const previousPosts = await previousResponse.json();
+    expect(Array.isArray(previousPosts)).toBe(true);
+    expect(previousPosts.length).toBeGreaterThan(0);
+    const previousPostId = previousPosts[0].id;
+
+    // Унікальний заголовок дозволяє відрізнити наш пост від інших тестових постів.
     const postData = {
-      title: 'Test Post from Playwright',
+      title: `Test Post from Playwright ${randomUUID()}`,
       content: 'This is test content created via API automation',
       status: 'publish',
       excerpt: 'Test excerpt'
     };
+
     const response = await postsService.createPost(postData);
     expect(response.ok()).toBeTruthy();
     expect(response.status()).toBe(201);
     const responseBody = await response.json();
     createdPostId = responseBody.id;
+
+    // Новий ID не повинен збігатися з останнім доступним ID і має бути більшим.
     expect(responseBody).toHaveProperty('id');
+    expect(typeof createdPostId).toBe('number');
+    expect(createdPostId).not.toBe(previousPostId);
+    expect(createdPostId).toBeGreaterThan(previousPostId);
+
     expect(responseBody.title.rendered).toBe(postData.title);
     expect(responseBody.status).toBe(postData.status);
+    expect(typeof responseBody.content.protected).toBe('boolean');
+    expect(responseBody.content.protected).toBe(false);
+
+    // Перевіряємо категорії та числовий формат їхніх ID.
+    expect(Array.isArray(responseBody.categories)).toBe(true);
+    expect(responseBody.categories).toContain(1);
+    expect(responseBody.categories).toEqual([1]);
+    for (const category of responseBody.categories) {
+      expect(String(category)).toMatch(/^\d+$/);
+    }
+
+    // Перевіряємо CSS-класи створеного поста.
+    expect(Array.isArray(responseBody.class_list)).toBe(true);
+    expect(responseBody.class_list).toContain('post');
+    expect(responseBody.class_list).toContain(`type-${responseBody.type}`);
+    expect(responseBody.class_list).toContain(`status-${responseBody.status}`);
+    expect(responseBody.class_list).toContain(`post-${responseBody.id}`);
+    expect(responseBody.class_list).toContain('category-news');
+    expect(responseBody.class_list).toContain('hentry');
+
+    // GET за створеним ID має повернути саме наш пост.
+    const getResponse = await postsService.getPost(createdPostId);
+    expect(getResponse.status()).toBe(200);
+    const fetchedPost = await getResponse.json();
+    expect(fetchedPost.id).toBe(createdPostId);
+    expect(fetchedPost.title.rendered).toBe(postData.title);
+
+    console.log('Previous post ID:', previousPostId);
     console.log('Created post ID:', createdPostId);
   });
   // Перевіряє, що API повертає непорожній список постів з основними полями.
