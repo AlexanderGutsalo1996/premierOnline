@@ -1,13 +1,20 @@
 import { Page, Locator, Response, expect, test } from '@playwright/test';
 import { Logger } from '../config/Logger';
+import { evidenceFor } from '../fixtures/evidence';
 
 // Allows expected values to be either text or a regular expression.
 type Matcher = string | RegExp;
+
+// Sensitive values (passwords) are never printed to logs, Playwright steps or Allure.
+interface SensitiveOptions {
+    sensitive?: boolean;
+}
 
 // Stores the browser page and creates a logger for each Page Object.
 export abstract class BasePage {
     readonly page: Page;
     protected readonly logger: Logger;
+    private quiet = 0; // > 0 while helper steps (the visibility pre-checks of click) must not add video pauses
 
     protected constructor(page: Page) {
         this.page = page;
@@ -22,10 +29,17 @@ export abstract class BasePage {
      */
     protected async step<T>(message: string, action: () => Promise<T>): Promise<T> {
         this.logger.info(message);
+        const evidence = evidenceFor(this.page);
+        const caption = message.startsWith('Fill ') ? 'Fill form field' : message.startsWith('Expect value ') ? 'Verify field value' : message;
+        await evidence?.caption(caption).catch(() => {});
 
         try {
-            return await test.step(message, action);
+            const result = await test.step(message, action);
+            if (this.quiet === 0) await evidence?.pace(message).catch(() => {});
+            if (message.startsWith('Expect ')) await evidence?.checkpoint(caption).catch(() => {});
+            return result;
         } catch (error) {
+            await evidence?.caption(caption, 'fail').catch(() => {});
             const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
             this.logger.error(`${message} -> FAILED: ${reason}`);
             throw error;
@@ -35,6 +49,11 @@ export abstract class BasePage {
     // Returns a custom element name or the locator description for logging.
     protected label(locator: Locator, name?: string): string {
         return name ?? locator.toString();
+    }
+
+    // Shows a value in logs, or a mask for sensitive values.
+    private show(value: Matcher, opts?: SensitiveOptions): string {
+        return opts?.sensitive ? '***' : String(value);
     }
 
 
@@ -56,8 +75,14 @@ export abstract class BasePage {
 
     // Verifies that an element is visible and enabled, then clicks it.
     async click(locator: Locator, name?: string): Promise<void> {
-        await this.expectVisible(locator, name);
-        await this.expectEnabled(locator, name);
+        this.quiet++;
+        try {
+            await this.expectVisible(locator, name);
+            await this.expectEnabled(locator, name);
+        } finally {
+            this.quiet--;
+        }
+        await evidenceFor(this.page)?.highlight(locator);
         //try catch (error) {
         await this.step(`Click: ${this.label(locator, name)}`, () => locator.click());
     }
@@ -73,10 +98,14 @@ export abstract class BasePage {
     }
 
     // Replaces the content of an input field with the provided value.
-    async fill(locator: Locator, value: string, name?: string): Promise<void> {
-        await this.step(`Fill "${value}" into: ${this.label(locator, name)}`, () =>
-            locator.fill(value)
-        );
+    async fill(locator: Locator, value: string, name?: string, opts?: SensitiveOptions): Promise<void> {
+        await this.step(`Fill "${this.show(value, opts)}" into: ${this.label(locator, name)}`, async () => {
+            // With evidence pacing the text is typed like a fast user instead of being pasted instantly.
+            const delay = evidenceFor(this.page)?.typingDelay() ?? 0;
+            if (!delay) return locator.fill(value);
+            await locator.fill('');
+            await locator.pressSequentially(value, { delay });
+        });
     }
 
     // Clears the current value of an input field.
@@ -219,8 +248,8 @@ export abstract class BasePage {
     }
 
     // Verifies the current value of an input.
-    async expectValue(locator: Locator, value: Matcher, name?: string): Promise<void> {
-        await this.step(`Expect value ${value} in: ${this.label(locator, name)}`, () =>
+    async expectValue(locator: Locator, value: Matcher, name?: string, opts?: SensitiveOptions): Promise<void> {
+        await this.step(`Expect value ${this.show(value, opts)} in: ${this.label(locator, name)}`, () =>
             expect(locator).toHaveValue(value)
         );
     }

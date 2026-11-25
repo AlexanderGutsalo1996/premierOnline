@@ -1,0 +1,4 @@
+{
+  "invalid": { "email": "invalid-user@example.com", "password": "WrongPassword123!" },
+  "form": { "email": "test@example.com", "password": "TestPass123!" }
+}

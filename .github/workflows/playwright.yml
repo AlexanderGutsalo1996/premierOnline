@@ -5,60 +5,189 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Override BASE_URL (optional)'
+        required: false
+        type: string
   schedule:
     - cron: '0 18 * * *'
       timezone: 'Europe/Kyiv'
 
-jobs:
-  test:
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ui:
+    name: UI tests (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      allure_html_url: ${{ steps.allure_html.outputs.artifact-url }} # direct download link of the Allure HTML artifact
+      tracker_url: ${{ steps.tracker.outputs.artifact-url }} # direct download link of the test tracker artifact
+      pw_url: ${{ steps.pw_report.outputs.artifact-url }} # direct download link of the Playwright report artifact
     env:
       CI: true
-      REGISTRATION_EMAIL: ${{ secrets.REGISTRATION_EMAIL }}
-      REGISTRATION_FIRST_NAME: ${{ secrets.REGISTRATION_FIRST_NAME }}
-      REGISTRATION_LAST_NAME: ${{ secrets.REGISTRATION_LAST_NAME }}
-      REGISTRATION_PASSWORD: ${{ secrets.REGISTRATION_PASSWORD }}
-      REGISTRATION_REPEAT_PASSWORD: ${{ secrets.REGISTRATION_REPEAT_PASSWORD }}
-      LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
-      LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-
+      BASE_URL: ${{ inputs.base_url || vars.BASE_URL }} # empty -> DEFAULT_BASE_URL from config/env.ts
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
-        id: tests
+        env:
+          LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
+          LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
         run: npx playwright test
 
-      - name: Upload Playwright Report
-        uses: actions/upload-artifact@v4
+      # Java is preinstalled on ubuntu-latest (Allure CLI 2 needs it).
+      - name: Generate Allure report
         if: ${{ !cancelled() }}
+        run: npx allure generate allure-results --clean -o allure-report
+
+      - name: Generate single-file Allure report (one HTML file, opens by double-click)
+        if: ${{ !cancelled() }}
+        run: npx allure generate allure-results --clean --single-file -o allure-report-single
+
+      - name: Assemble reports site
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p site
+          cp -r allure-report site/allure
+          cp -r playwright-report site/playwright
+          [ -d tracker-report ] && cp -r tracker-report site/tracker || true
+          printf '<h1>Premiereonline test reports</h1><ul><li><a href="allure/">Allure Report</a></li><li><a href="playwright/">Playwright HTML Report</a></li><li><a href="tracker/">Test tracker</a></li></ul>' > site/index.html
+
+      - name: Upload Playwright report
+        id: pw_report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload Allure report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload Allure HTML (single file, for direct download from Slack)
+        id: allure_html
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report-html
+          path: allure-report-single/index.html
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload test tracker (HTML + evidence videos/screenshots)
+        id: tracker
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-tracker
+          path: tracker-report/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload Allure results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload diagnostics (screenshots, traces, videos)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload JSON summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-summary
+          path: playwright-summary.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload site for GitHub Pages
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: ui
+    if: ${{ !cancelled() && needs.ui.result != 'skipped' && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  notify:
+    needs: [ui, pages]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Download JSON summary
+        uses: actions/download-artifact@v4
+        continue-on-error: true # missing if tests never ran
+        with:
+          name: playwright-summary
+          path: .
 
       - name: Notify Slack
-        if: ${{ !cancelled() }}
+        run: node .github/scripts/playwright-slack.cjs
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          TEST_OUTCOME: ${{ steps.tests.outcome }}
-          JOB_STATUS: ${{ job.status }}
+          JOB_STATUS: ${{ needs.ui.result }}
+          PAGES_URL: ${{ needs.pages.outputs.page_url }}
+          ALLURE_HTML_URL: ${{ needs.ui.outputs.allure_html_url }}
+          TRACKER_URL: ${{ needs.ui.outputs.tracker_url }}
+          PW_URL: ${{ needs.ui.outputs.pw_url }}
+          BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
           EXTERNAL_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
-        run: node .github/scripts/playwright-slack.cjs

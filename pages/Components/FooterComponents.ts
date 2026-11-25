@@ -1,5 +1,6 @@
 
 import { Page, Locator, expect } from '@playwright/test';
+import { siteUrl } from '../../config/env';
 
 export class FooterComponents {
     readonly page: Page;
@@ -38,7 +39,7 @@ export class FooterComponents {
         await expect(this.privacyPolicy).toBeVisible();
         await expect(this.privacyPolicy).toHaveAttribute(
             'href',
-            'https://www.premieronline.com/legal/privacy'
+            siteUrl('/legal/privacy')
         );
     }
 
@@ -46,7 +47,7 @@ export class FooterComponents {
         await expect(this.cookies).toBeVisible();
         await expect(this.cookies).toHaveAttribute(
             'href',
-            'https://www.premieronline.com/legal/cookies'
+            siteUrl('/legal/cookies')
         );
     }
 
@@ -54,7 +55,7 @@ export class FooterComponents {
         await expect(this.termsConditions).toBeVisible();
         await expect(this.termsConditions).toHaveAttribute(
             'href',
-            'https://www.premieronline.com/legal/terms-participant'
+            siteUrl('/legal/terms-participant')
         );
     }
 
@@ -62,7 +63,7 @@ export class FooterComponents {
         await expect(this.termsOfUse).toBeVisible();
         await expect(this.termsOfUse).toHaveAttribute(
             'href',
-            'https://www.premieronline.com/legal/terms-of-service'
+            siteUrl('/legal/terms-of-service')
         );
     }
 
@@ -76,7 +77,7 @@ export class FooterComponents {
         await expect(this.contactUs).toBeVisible();
         await expect(this.contactUs).toHaveAttribute(
             'href',
-            'https://www.premieronline.com/help'
+            siteUrl('/help')
         );
     }
 

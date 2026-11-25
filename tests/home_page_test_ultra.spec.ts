@@ -1,5 +1,5 @@
 
-import { test } from '@playwright/test';
+import { test } from '../fixtures/evidence';
 import { HomePage } from '../pages/HomePage';
 import { HeaderComponents } from '../pages/Components/HeaderComponents';
 import { FooterComponents } from '../pages/Components/FooterComponents';

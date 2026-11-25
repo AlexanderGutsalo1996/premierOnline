@@ -1,22 +1,12 @@
-
-import { test, expect } from '@playwright/test';
+import { test } from '../fixtures/evidence';
 import { SignInPage, type SignInData } from '../pages/SignInPage';
-import dotenv from 'dotenv';
-import signInData from '../Data/authData.json';
-
-// Load credentials from .env.local
-dotenv.config({ path: '.env.local' });
+import { getLoginCredentials } from '../config/env';
+import signInData from '../Data/signInData.json';
 
 test.describe('Sign In page', () => {
     let signIn: SignInPage;
-    const testData: SignInData = signInData.valid;
     const invalidData: SignInData = signInData.invalid;
     const formData: SignInData = signInData.form;
-
-    // const testData: SignInData = {
-    //     email: 'test@example.com',
-    //     password: 'TestPass123!'
-    // };
 
     test.beforeEach(async ({ page }) => {
         signIn = new SignInPage(page);
@@ -59,13 +49,7 @@ test.describe('Sign In page', () => {
         });
     });
 
-    test('negative login with invalid credentials', async ({ page }) => {
-        
-        // const invalidData: SignInData = {
-        //     email: 'invalid-user@example.com',
-        //     password: 'WrongPassword123!'
-        // };
-
+    test('negative login with invalid credentials', async () => {
         await test.step('Enter invalid credentials', async () => {
             await signIn.fillSignInForm(invalidData);
         });
@@ -79,20 +63,9 @@ test.describe('Sign In page', () => {
         });
     });
 
-    test('positive login with valid credentials', async ({ page }) => {
-    if (!testData.email || !testData.password) {
-        throw new Error(
-            'Valid email and password must be provided in authData.json'
-        );
-    }
-        // const email = process.env.LOGIN_EMAIL;
-        // const password = process.env.LOGIN_PASSWORD;
-        // if (!email || !password) {
-        //     throw new Error(
-        //         'LOGIN_EMAIL and LOGIN_PASSWORD must be set in .env.local'
-        //     );
-        // }
-
+    test('positive login with valid credentials', async () => {
+        // Real credentials come only from .env.local / CI secrets, never from tracked files.
+        const testData: SignInData = getLoginCredentials();
 
         await test.step('Enter valid credentials', async () => {
             await signIn.fillSignInForm(testData);
@@ -103,9 +76,7 @@ test.describe('Sign In page', () => {
         });
 
         await test.step('Verify successful authentication', async () => {
-            await signIn.expectHidden(signIn.loginErrorMessage);
-
-            await expect(page).not.toHaveURL(/\/action\/dologin/);
+            await signIn.expectSignedIn();
         });
     });
 });

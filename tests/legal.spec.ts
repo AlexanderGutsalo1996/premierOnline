@@ -1,5 +1,5 @@
 
-import { test } from '@playwright/test';
+import { test } from '../fixtures/evidence';
 import { LegalPage } from '../pages/LegalPage';
 
 test('Privacy Policy page', async ({ page }) => {

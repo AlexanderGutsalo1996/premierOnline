@@ -1,6 +1,7 @@
 
 import { Page, Locator } from '@playwright/test';
 import { BasePage } from './BasePage';
+import { siteUrl, siteRootPattern } from '../config/env';
 
 export class LegalPage extends BasePage {
     readonly wrapper: Locator;
@@ -10,9 +11,9 @@ export class LegalPage extends BasePage {
     readonly languageButton: Locator;
     readonly pageHeading: Locator;
 
-    readonly privacyUrl = 'https://www.premieronline.com/legal/privacy/';
-    readonly cookiesUrl = 'https://www.premieronline.com/legal/cookies/';
-    readonly termsUrl = 'https://www.premieronline.com/legal/terms-participant/';
+    readonly privacyUrl = siteUrl('/legal/privacy/');
+    readonly cookiesUrl = siteUrl('/legal/cookies/');
+    readonly termsUrl = siteUrl('/legal/terms-participant/');
 
     constructor(page: Page) {
         super(page);
@@ -50,7 +51,7 @@ export class LegalPage extends BasePage {
         await this.expectAttribute(
             this.logo,
             'href',
-            'https://www.premieronline.com',
+            siteUrl(),
             'Logo link'
         );
     }
@@ -86,6 +87,6 @@ export class LegalPage extends BasePage {
     // Navigate to home page
     async clickLogo() {
         await this.click(this.logo, 'Premier Online logo');
-        await this.expectUrl(/^https:\/\/www\.premieronline\.com\/?$/);
+        await this.expectUrl(siteRootPattern());
     }
 }

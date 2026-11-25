@@ -1,14 +1,6 @@
-﻿
 import { Page, Locator } from '@playwright/test';
 import { BasePage } from './BasePage';
-
-export interface RegistrationData {
-    email: string;
-    firstName: string;
-    lastName: string;
-    password: string;
-    repeatPassword: string;
-}
+import type { RegistrationData } from '../Data/registration';
 
 export class RegisterPage extends BasePage {
     readonly expectedEmailType = 'email';
@@ -96,16 +88,16 @@ export class RegisterPage extends BasePage {
         await this.fill(this.emailInput, data.email);
         await this.fill(this.firstNameInput, data.firstName);
         await this.fill(this.lastNameInput, data.lastName);
-        await this.fill(this.passwordInput, data.password);
-        await this.fill(this.repeatPasswordInput, data.repeatPassword);
+        await this.fill(this.passwordInput, data.password, 'Password', { sensitive: true });
+        await this.fill(this.repeatPasswordInput, data.repeatPassword, 'Repeat password', { sensitive: true });
     }
 
     async checkRegistrationData(data: RegistrationData) {
         await this.expectValue(this.emailInput, data.email);
         await this.expectValue(this.firstNameInput, data.firstName);
         await this.expectValue(this.lastNameInput, data.lastName);
-        await this.expectValue(this.passwordInput, data.password);
-        await this.expectValue(this.repeatPasswordInput, data.repeatPassword);
+        await this.expectValue(this.passwordInput, data.password, 'Password', { sensitive: true });
+        await this.expectValue(this.repeatPasswordInput, data.repeatPassword, 'Repeat password', { sensitive: true });
     }
 
     async submitRegistration() {

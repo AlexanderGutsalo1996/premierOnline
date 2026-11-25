@@ -1,4 +1,5 @@
 import {Page,Locator,expect} from "@playwright/test"
+import { siteUrl } from "../../config/env";
 export class HeaderComponents {
 readonly page:Page;
 readonly logolink:Locator;
@@ -29,13 +30,13 @@ constructor (page:Page){
 }
 async checkLogoLink(){
     await expect(this.logolink).toBeVisible();
-    await expect(this.logolink).toHaveAttribute('href', 'https://www.premieronline.com');
+    await expect(this.logolink).toHaveAttribute('href', siteUrl());
 }
 async checkLogoImg(){
     await expect(this.logoimg).toBeVisible();
     await expect(this.logoimg).toHaveAttribute(
         'src',
-        'https://www.premieronline.com/assets/img/logo.svg');
+        siteUrl('/assets/img/logo.svg'));
 }
 async checkSearchInput(){
     await expect(this.searchinput).toBeVisible();

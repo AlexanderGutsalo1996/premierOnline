@@ -3,6 +3,16 @@ import { relative } from 'node:path';
 
 const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// 15.1 s under a minute, 3 m 47 s from a minute up.
+const formatDuration = (ms: number) => {
+  const seconds = ms / 1000;
+  if (seconds < 59.95) return `${seconds.toFixed(1)} s`;
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return `${h ? `${h} h ` : ""}${m} m ${total % 60} s`;
+};
+
 export default class LocalSlackReporter implements Reporter {
   private suite?: Suite;
   private executed = false;
@@ -32,7 +42,9 @@ export default class LocalSlackReporter implements Reporter {
       counts[outcome]++;
       if (outcome === 'unexpected' || outcome === 'flaky') {
         const location = relative(process.cwd(), test.location.file);
-        issues.push(`${outcome === 'flaky' ? '⚠️' : '❌'} ${escape(location)}:${test.location.line}`);
+        // Titles are static and credential-free (no emails/passwords in test titles).
+        const title = test.titlePath().slice(3).join(' › ');
+        issues.push(`${outcome === 'flaky' ? '⚠️' : '❌'} ${escape(title)} — ${escape(location)}:${test.location.line}`);
       }
     }
     const status = { passed: '✅ Passed', failed: '❌ Failed', timedout: '⏱️ Timed out', interrupted: '⚠️ Interrupted' }[result.status];
@@ -40,8 +52,8 @@ export default class LocalSlackReporter implements Reporter {
       `*Playwright Tests — ${status}*`,
       'Project: premiereonline | Trigger: Local (VS Code / CLI)',
       `*Total:* ${tests.length} | ✅ Passed: ${counts.expected} | ❌ Failed: ${counts.unexpected} | ⚠️ Flaky: ${counts.flaky} | ⏭️ Skipped: ${counts.skipped}`,
-      `Duration: ${(result.duration / 1000).toFixed(1)} seconds`,
-      ...(issues.length ? ['*Failed or flaky test locations:*', ...issues.slice(0, 15)] : []),
+      `Duration: ${formatDuration(result.duration)}`,
+      ...(issues.length ? ['*Failed or flaky tests:*', ...issues.slice(0, 15)] : []),
       ...(issues.length > 15 ? [`…and ${issues.length - 15} more in the local report.`] : []),
       'Reports: local Playwright HTML and Allure.',
     ];

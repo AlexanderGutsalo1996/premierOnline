@@ -10,6 +10,13 @@ node_modules/
 # Allure Report
 /allure-results/
 /allure-report/
+/allure-report-single/
+/tracker-report/
+/evidence/
+
+# Runtime data and credentials that must never be committed
+/.runtime/
+/Data/authData.json
 
 # Local environment files
 .env

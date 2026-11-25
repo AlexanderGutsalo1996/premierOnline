@@ -1,6 +1,6 @@
-
 import { Page, Locator } from '@playwright/test';
 import { BasePage } from './BasePage';
+import { siteUrl } from '../config/env';
 
 export interface SignInData {
     email: string;
@@ -8,7 +8,6 @@ export interface SignInData {
 }
 
 export class SignInPage extends BasePage {
-    readonly page: Page;
     readonly signInForm: Locator;
     readonly emailInput: Locator;
     readonly passwordInput: Locator;
@@ -22,7 +21,6 @@ export class SignInPage extends BasePage {
     constructor(page: Page) {
         super(page);
 
-        this.page = page;
         this.signInForm = page.locator('form[action$="/login.php"]');
         this.emailInput = this.signInForm.locator('#login_name');
         this.passwordInput = this.signInForm.locator('#password');
@@ -62,12 +60,12 @@ export class SignInPage extends BasePage {
 
     async fillSignInForm(data: SignInData) {
         await this.fill(this.emailInput, data.email);
-        await this.fill(this.passwordInput, data.password);
+        await this.fill(this.passwordInput, data.password, 'Password', { sensitive: true });
     }
 
     async checkSignInData(data: SignInData) {
         await this.expectValue(this.emailInput, data.email);
-        await this.expectValue(this.passwordInput, data.password);
+        await this.expectValue(this.passwordInput, data.password, 'Password', { sensitive: true });
     }
 
     async submitSignIn() {
@@ -88,11 +86,11 @@ export class SignInPage extends BasePage {
 
     async checkSignInLinks() {
         await this.expectVisible(this.forgotPasswordLink);
-        await this.expectAttribute(this.forgotPasswordLink, 'href', 'https://www.premieronline.com/action/forgot_password');
+        await this.expectAttribute(this.forgotPasswordLink, 'href', siteUrl('/action/forgot_password'));
         await this.expectVisible(this.createAccountLink);
-        await this.expectAttribute(this.createAccountLink, 'href', 'https://www.premieronline.com/action/register');
+        await this.expectAttribute(this.createAccountLink, 'href', siteUrl('/action/register'));
         await this.expectVisible(this.registerAsGuestLink);
-        await this.expectAttribute(this.registerAsGuestLink, 'href', 'https://www.premieronline.com/guest_add_create.php');
+        await this.expectAttribute(this.registerAsGuestLink, 'href', siteUrl('/guest_add_create.php'));
     }
 
     async openForgotPasswordPage() {
@@ -105,5 +103,12 @@ export class SignInPage extends BasePage {
 
     async openGuestRegistrationPage() {
         await this.click(this.registerAsGuestLink);
+    }
+
+    // Signed in: the browser left the sign-in URL (waited for first), the form is gone and there is no error.
+    async expectSignedIn() {
+        await this.expectUrl(/^(?!.*\/action\/dologin)/);
+        await this.expectHidden(this.signInForm, 'Sign in form');
+        await this.expectHidden(this.loginErrorMessage, 'Login error');
     }
 }

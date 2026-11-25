@@ -1,5 +1,5 @@
 
-import { test } from '@playwright/test';
+import { test } from '../fixtures/evidence';
 import { CreateEventPage } from '../pages/CreateEventPage';
 
 test.describe('Dashboard Authentication', () => {

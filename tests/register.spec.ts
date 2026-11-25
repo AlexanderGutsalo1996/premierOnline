@@ -1,6 +1,5 @@
-﻿
-import { test } from '@playwright/test';
-import { RegisterPage } from '../pages/RegistePage';
+import { test } from '../fixtures/evidence';
+import { RegisterPage } from '../pages/RegisterPage';
 import { generateRegistrationData } from '../Data/registration';
 
 test.describe('Registration page', () => {

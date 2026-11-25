@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/evidence';
+import { siteUrl } from '../config/env';
  
 test.describe('Test Home Page', () => {
   test.beforeEach(async ({ page }) => {
@@ -16,10 +17,10 @@ test.describe('Test Home Page', () => {
     const header = page.locator('.uk-logo');
     await expect(header).toBeVisible();
     await expect(header).toHaveClass(/uk-logo/);
-    await expect(header).toHaveAttribute('href', 'https://www.premieronline.com');
+    await expect(header).toHaveAttribute('href', siteUrl());
  
     const logo = header.locator('img');
-    await expect(logo).toHaveAttribute('src', 'https://www.premieronline.com/assets/img/logo.svg');
+    await expect(logo).toHaveAttribute('src', siteUrl('/assets/img/logo.svg'));
     // NOTE: "Premiere" vs the site name "Premier" - confirm which is intended
     await expect(logo).toHaveAttribute('alt', 'Premiere Online');
   });

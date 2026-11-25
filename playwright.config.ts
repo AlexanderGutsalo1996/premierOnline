@@ -1,8 +1,9 @@
-﻿import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
+import { getBaseUrl } from './config/env';
 
 const localEnvPath = resolve(__dirname, '.env.local');
 if (existsSync(localEnvPath)) {
@@ -21,32 +22,38 @@ export default defineConfig({
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
   /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : Number(process.env.WORKERS) || undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   //reporter: 'html',
   reporter: [
   ['list'],
   ['html', { open: 'never' }],
-  ['allure-playwright', { resultsDir: 'allure-results' }],
+  // detail:false keeps only our labelled test.step()s in Allure; Playwright's internal API steps
+  // (e.g. `Fill "<value>"`) would otherwise print typed values, including passwords.
+  ['allure-playwright', { resultsDir: 'allure-results', detail: false }],
+  ['./reporters/neon-tracker.ts'],
   ...(process.env.CI
     ? [['json', { outputFile: 'playwright-summary.json' }] as ['json', { outputFile: string }]]
     : [['./reporters/local-slack.ts'] as [string]])
 ],
-globalTeardown: process.env.CI ? undefined : './allure-teardown.ts',
+globalSetup: './allure-setup.ts',
+globalTeardown: process.env.CI || process.env.NO_REPORT_OPEN ? undefined : './allure-teardown.ts',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
-     baseURL: 'https://www.premieronline.com',
+     baseURL: getBaseUrl(),
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'on-first-retry',
+    trace: process.env.EVIDENCE_MODE === '1' ? 'on' : 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: process.env.EVIDENCE_MODE === '1' ? { mode: 'on', size: { width: 1440, height: 900 } } : { mode: 'on', size: { width: 1280, height: 720 } },
   },
 
   /* Configure projects for major browsers */
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.EVIDENCE_MODE === '1' ? { viewport: { width: 1440, height: 900 } } : {}) },
     },
 
     // {
