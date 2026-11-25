@@ -1,6 +1,5 @@
 # Evidence Mode
 
-Run the offline demo with `npm run test:evidence -- tests/evidence-demo.spec.ts`.
 Run any UI spec with `npm run test:evidence -- tests/legal.spec.ts`.
 Open the HTML report with `npm run report`.
 
@@ -20,6 +19,5 @@ MP4 conversion uses the bundled `@ffmpeg-installer/ffmpeg` dependency. Set `EVID
 
 For a new UI test, import `test` and `expect` from `../fixtures/evidence`. Call `await evidence.caption('Action')`, `await evidence.highlight(locator)`, and `await evidence.checkpoint('Expected result')` only after the corresponding assertion succeeds. Use plain Playwright for API-only tests.
 
-The before/after demo has no external dependencies. Run the optional intentional-failure example with PowerShell: `$env:EVIDENCE_FAILURE_DEMO='1'; npm run test:evidence`. Clear the variable afterward with `Remove-Item Env:EVIDENCE_FAILURE_DEMO`.
 
 Use approved test accounts and test data for all runs, since evidence is now retained on success too. Videos, traces and screenshots can show sensitive information; review them before sharing. Never include secrets in captions.

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/api';
 const BASE_URL = 'https://dev.emeli.in.ua/wp-json/wp/v2';
 const POSTS_ENDPOINT = `${BASE_URL}/posts`;
 
@@ -15,6 +15,7 @@ const getAuthHeaders = () => ({
   'Content-Type': 'application/json'
 });
 test.describe('WordPress Posts API - CRUD Tests', () => {
+  test.describe.configure({ mode: 'serial' }); // the tests share createdPostId, so they run in order in one worker
   let createdPostId: number;
   test.beforeAll(async () => {
     // Перевірка доступності API

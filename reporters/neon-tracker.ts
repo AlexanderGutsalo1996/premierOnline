@@ -1,6 +1,6 @@
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestError, TestResult, TestStep } from '@playwright/test/reporter';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { convertVideo, publishLatest, specName } from './evidence-files';
@@ -40,6 +40,16 @@ interface EvidenceFile {
   url: string;
 }
 
+interface ApiCall {
+  method: string;
+  url: string;
+  status: number;
+  statusText: string;
+  ms: number;
+  requestBody?: string;
+  responseBody?: string;
+}
+
 interface TestRecord {
   id: number;
   file: string;
@@ -61,6 +71,7 @@ interface TestRecord {
   screenshots: EvidenceFile[];
   videos: EvidenceFile[];
   specVideo?: string;
+  apiCalls?: ApiCall[];
   trace?: EvidenceFile;
   rerun: string;
 }
@@ -87,6 +98,15 @@ function failedPath(nodes: StepNode[]): string[] | undefined {
     return [node.title, ...(failedPath(node.children) ?? [])];
   }
   return undefined;
+}
+
+// Specs written without test.step: fall back to the Playwright actions and assertions of the test body.
+// Value-bearing actions (fill, type, press, select, evaluate) and fixture noise are left out.
+const RAW_SKIP = /^(Fill|Type|Press|Insert text|Select|Set input|Evaluate|Create |Launch |Close |Wait for)/;
+function rawSteps(steps: TestStep[]): StepNode[] {
+  return steps
+    .filter((step) => (step.category === 'pw:api' || step.category === 'expect') && !RAW_SKIP.test(step.title))
+    .map((step) => ({ title: step.title, ms: Math.round(step.duration), failed: !!step.error, hook: false, children: [] }));
 }
 
 // First stack frame (inside the project, not node_modules) matching the filter, as `file:line`.
@@ -318,6 +338,20 @@ export default class NeonTrackerReporter implements Reporter {
       rerun: `${file}:${test.location.line}`,
     };
 
+    if (shown) {
+      if (!record.steps.some((s) => !s.hook)) record.steps.push(...rawSteps(shown.steps));
+      // API calls recorded by fixtures/api.ts
+      for (const a of shown.attachments) {
+        if (!/^api-call-[0-9]+$/.test(a.name) || a.contentType !== 'application/json') continue;
+        try {
+          const text = a.body ? a.body.toString('utf8') : readFileSync(a.path as string, 'utf8');
+          (record.apiCalls ??= []).push(JSON.parse(text) as ApiCall);
+        } catch {
+          // unreadable attachment: skip
+        }
+      }
+    }
+
     if (shown && (status === 'failed' || status === 'flaky')) {
       const error = shown.errors[0] ?? shown.error;
       record.error = strip(error?.message ?? 'No error message').slice(0, 3000);
@@ -502,6 +536,13 @@ details.raw>summary{cursor:pointer;color:var(--muted);font-size:13px}
 .empty{padding:24px;text-align:center;color:var(--muted)}
 #lightbox{position:fixed;inset:0;z-index:50;background:rgba(5,2,12,.92);display:flex;align-items:center;justify-content:center;cursor:zoom-out}
 #lightbox[hidden]{display:none}#lightbox img{max-width:94vw;max-height:94vh;border:1px solid var(--pink);box-shadow:0 0 40px rgba(255,46,151,.5)}
+.call{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:rgba(10,4,20,.5)}
+.call>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:8px 12px}
+.call>summary::-webkit-details-marker{display:none}
+.call .u{flex:1;min-width:200px;font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--muted);word-break:break-all}
+.call .cb{padding:0 12px 12px}.k2{margin:8px 0 2px;font:800 11px/1 inherit;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.chip.s2{color:var(--green);border-color:var(--green)}.chip.s3{color:var(--cyan);border-color:var(--cyan)}.chip.s4{color:var(--orange);border-color:var(--orange)}.chip.s5{color:var(--red);border-color:var(--red)}
+.note{margin:14px 0;padding:10px 14px;border-radius:8px;border:1px dashed var(--line);color:var(--muted);font-size:13px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
 `;
 
@@ -532,7 +573,22 @@ function steps(list,failedPath,depth){
   return h+'</ol>';
 }
 
+function apiCalls(t){
+  if(!t.apiCalls||!t.apiCalls.length)return '';
+  var h='<div class="ev"><div class="k">API calls</div>';
+  t.apiCalls.forEach(function(c){
+    var cls='s'+String(c.status).charAt(0);
+    h+='<details class="call"><summary><span class="chip '+cls+'">'+esc(c.status)+'</span> <b>'+esc(c.method)+'</b> <span class="u">'+esc(c.url)+'</span><span class="dur">'+fmt(c.ms)+'</span></summary><div class="cb">';
+    if(c.requestBody)h+='<div class="k2">Request body</div><pre>'+esc(c.requestBody)+'</pre>';
+    if(c.responseBody)h+='<div class="k2">Response body</div><pre>'+esc(c.responseBody)+'</pre>';
+    if(!c.requestBody&&!c.responseBody)h+='<div class="k2">No body</div>';
+    h+='</div></details>';
+  });
+  return h+'</div>';
+}
+
 function evidence(t){
+  if(!t.videos.length&&!t.screenshots.length&&!t.trace&&t.status!=='skipped')return '<div class="note">'+(t.apiCalls&&t.apiCalls.length?'Video and screenshots: unavailable. This is a backend API test, it does not open a browser. Its requests and responses are listed above.':'Video and screenshots: unavailable. This test did not open a browser.')+'</div>';
   var h='';
   if(t.videos.length||t.screenshots.length||t.trace){
     h+='<div class="ev"><div class="k">Evidence</div><div class="evg">';
@@ -575,7 +631,7 @@ function card(t){
     h+='<ul>'+d.next.map(function(n){return '<li>'+esc(n)+'</li>'}).join('')+'</ul>';
     h+='<div class="tools2"><span class="btn" data-copy="npx playwright test '+esc(t.rerun)+'">Copy re-run command</span><span class="btn" data-copy="npm run test:evidence -- '+esc(t.rerun)+'">Copy evidence-mode command</span></div></div>';
   }
-  h+=evidence(t);
+  h+=apiCalls(t);h+=evidence(t);
   if(t.steps.length)h+='<div class="steps"><div class="k">Step timeline</div>'+steps(t.steps,t.failedPath,0)+'</div>';
   if(t.error)h+='<details class="raw"><summary>Raw error</summary><pre>'+esc(t.error)+'</pre></details>';
   return h+'</div></details>';
