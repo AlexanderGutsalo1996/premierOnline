@@ -31,7 +31,7 @@ export default defineConfig({
   // detail:false keeps only our labelled test.step()s in Allure; Playwright's internal API steps
   // (e.g. `Fill "<value>"`) would otherwise print typed values, including passwords.
   ['allure-playwright', { resultsDir: 'allure-results', detail: false }],
-  ['./reporters/neon-tracker.ts'],
+  ['./reporters/test-tracker.ts'],
   ...(process.env.CI
     ? [['json', { outputFile: 'playwright-summary.json' }] as ['json', { outputFile: string }]]
     : [['./reporters/local-slack.ts'] as [string]])

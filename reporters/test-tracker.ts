@@ -6,13 +6,17 @@ import { pathToFileURL } from 'node:url';
 import { convertVideo, publishLatest, specName } from './evidence-files';
 
 /**
- * Neon test tracker: a self-contained HTML report (tracker-report/index.html) that shows at a glance which tests
+ * Test tracker: a self-contained HTML report (tracker-report/index.html) that shows at a glance which tests
  * passed / failed, points at the exact failing step, gives a probable diagnosis (app bug vs test issue vs
  * environment vs flaky) and embeds the evidence (annotated MP4, screenshots, trace).
  * Opened automatically after local runs (not on CI, not with NO_REPORT_OPEN); on CI it is uploaded as an artifact.
  */
 
 const OUT_DIR = 'tracker-report';
+
+// Visual theme of the report: light | dark | corporate (TRACKER_THEME). The viewer can also switch it in the page.
+const THEMES = ['light', 'dark', 'corporate'];
+const pickTheme = () => (THEMES.includes(process.env.TRACKER_THEME ?? '') ? (process.env.TRACKER_THEME as string) : 'light');
 
 type Status = 'passed' | 'failed' | 'flaky' | 'skipped';
 type Verdict = 'APP_BUG' | 'TEST' | 'ENV' | 'FLAKY' | 'CHECK' | 'UNKNOWN';
@@ -124,7 +128,7 @@ function frame(error: TestError | undefined, accept: (path: string) => boolean):
 
 // ───────────────────────── Diagnosis: where does the failure probably come from? ─────────────────────────
 
-function diagnose(message: string, flaky: boolean, timedOut: boolean): Diagnosis {
+function diagnose(message: string, flaky: boolean, timedOut: boolean, ctx: { stepTitle?: string; testTitle?: string } = {}): Diagnosis {
   const text = strip(message);
   const pick = (re: RegExp) => re.exec(text)?.[1]?.trim();
   const expected = pick(/Expected(?: string| pattern| substring)?:\s*(.+)/);
@@ -208,6 +212,23 @@ function diagnose(message: string, flaky: boolean, timedOut: boolean): Diagnosis
       expected, received, locator,
     };
   }
+  // Negative scenario: the test does something wrong on purpose and expects the app to reject it with a message.
+  // If that message is missing, the app most likely accepted the invalid input: a bug until proven otherwise.
+  const negativeTest = /validation|negative|invalid|error|unregistered|duplicate|reject|forbidden|unauthori[sz]ed/i.test(ctx.testTitle ?? '');
+  const errorStep = /error|validation|invalid|warning|message/i.test(ctx.stepTitle ?? '');
+  if (negativeTest && errorStep && (notFound || actionTimeout || name === 'toBeVisible')) {
+    return {
+      verdict: 'APP_BUG',
+      title: 'Probable app bug: the expected error message did not appear',
+      why: 'This is a negative scenario: the test does something wrong on purpose and expects the app to reject it with a message. The message is missing, so the app probably accepted the invalid input (validation is not working).',
+      next: [
+        'Open the screenshot: did the app accept the input (new page, logged in, success state)?',
+        'If yes, this is a real bug (missing validation): report it and do not change the test.',
+        'If the form is still shown and only the message element has another test id or container, fix the locator (TEST ISSUE).',
+      ],
+      expected, received: received ?? (notFound ? '(element not found)' : undefined), locator,
+    };
+  }
   if (notFound || actionTimeout || name === 'toBeVisible' || name === 'toBeEnabled' || name === 'toBeAttached') {
     return {
       verdict: 'CHECK',
@@ -232,7 +253,7 @@ function diagnose(message: string, flaky: boolean, timedOut: boolean): Diagnosis
 
 // ───────────────────────── Reporter ─────────────────────────
 
-export default class NeonTrackerReporter implements Reporter {
+export default class TestTrackerReporter implements Reporter {
   private suite?: Suite;
   private config?: FullConfig;
   private startedAt = new Date();
@@ -288,7 +309,7 @@ export default class NeonTrackerReporter implements Reporter {
 
     const baseURL = (this.config?.projects[0]?.use as { baseURL?: string } | undefined)?.baseURL ?? '';
     const data = {
-      title: 'TEST TRACKER',
+      title: 'Test report',
       startedAt: this.startedAt.toISOString(),
       durationMs: Math.round(result.duration),
       runStatus: result.status,
@@ -306,8 +327,8 @@ export default class NeonTrackerReporter implements Reporter {
       tests: records,
     };
     const indexFile = join(out, 'index.html');
-    writeFileSync(indexFile, renderHtml(data));
-    console.log(`\nTest tracker: ${OUT_DIR}/index.html  (${counts.failed} failed, ${counts.flaky} flaky, ${counts.passed} passed)`);
+    writeFileSync(indexFile, renderHtml(data, pickTheme()));
+    console.log(`\nTest report: ${OUT_DIR}/index.html  (${counts.failed} failed, ${counts.flaky} flaky, ${counts.passed} passed)`);
     console.log(`Open: ${pathToFileURL(indexFile).href}`);
 
     if (!process.env.CI && !process.env.NO_REPORT_OPEN) openInBrowser(indexFile);
@@ -362,7 +383,10 @@ export default class NeonTrackerReporter implements Reporter {
       if (failedTop && !failedTop.hook) record.failedTop = { index: topLevel.indexOf(failedTop) + 1, total: topLevel.length };
       record.specAt = frame(error, (p) => p.includes('/tests/'));
       record.pageAt = frame(error, (p) => p.includes('/pages/') && !p.endsWith('/BasePage.ts')) ?? frame(error, (p) => p.endsWith('/BasePage.ts'));
-      record.diagnosis = diagnose(record.error, status === 'flaky', record.timedOut);
+      record.diagnosis = diagnose(record.error, status === 'flaky', record.timedOut, {
+        stepTitle: record.failedPath?.[record.failedPath.length - 1],
+        testTitle: record.title,
+      });
     }
 
     // Evidence: copy attachments next to the report so it stays viewable after test-results is cleaned.
@@ -425,18 +449,18 @@ function openInBrowser(file: string) {
 
 // ───────────────────────── HTML ─────────────────────────
 
-function renderHtml(data: unknown): string {
+function renderHtml(data: unknown, theme: string): string {
   const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028|\u2029/g, '');
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="${theme}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test Tracker</title>
+<title>Test report</title>
 <style>${CSS}</style>
 </head>
 <body>
-<div class="sky"></div><div class="sun"></div><div class="floor"></div>
+<header class="top"><div class="in" id="top"></div></header>
 <main id="app"></main>
 <div id="lightbox" hidden><img alt=""></div>
 <script id="data" type="application/json">${json}</script>
@@ -446,104 +470,94 @@ function renderHtml(data: unknown): string {
 }
 
 const CSS = `
-:root{--bg:#0a0414;--panel:rgba(22,9,42,.78);--line:rgba(255,46,151,.35);--pink:#ff2e97;--cyan:#00f0ff;--purple:#9d4dff;--orange:#ff8a3d;--green:#2dff9a;--red:#ff3860;--yellow:#ffe14d;--text:#f6ecff;--muted:#b49bd6}
+:root,[data-theme="light"]{--bg:#f6f8fa;--panel:#ffffff;--panel2:#f6f8fa;--line:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#0969da;--green:#1a7f37;--green-bg:#dafbe1;--red:#cf222e;--red-bg:#ffebe9;--amber:#9a6700;--amber-bg:#fff8c5;--gray:#6e7781;--gray-bg:#eaeef2;--hdr-bg:#ffffff;--hdr-text:#1f2328;--radius:8px;--shadow:0 1px 2px rgba(31,35,40,.06)}
+[data-theme="dark"]{--bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--green-bg:#12261a;--red:#f85149;--red-bg:#2d1519;--amber:#d29922;--amber-bg:#2a2210;--gray:#8b949e;--gray-bg:#21262d;--hdr-bg:#161b22;--hdr-text:#e6edf3;--radius:8px;--shadow:none}
+[data-theme="corporate"]{--bg:#eef1f5;--panel:#ffffff;--panel2:#f4f6f9;--line:#d5dbe3;--text:#1b2a3a;--muted:#5d6b7a;--accent:#1f4e8c;--green:#1d7a46;--green-bg:#e3f4ea;--red:#b42318;--red-bg:#fdecea;--amber:#9a5b00;--amber-bg:#fff4dc;--gray:#5d6b7a;--gray-bg:#e6eaf0;--hdr-bg:#14284b;--hdr-text:#ffffff;--radius:4px;--shadow:0 1px 3px rgba(20,40,75,.12)}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
-.sky{position:fixed;inset:0;z-index:-3;background:linear-gradient(180deg,#07020f 0%,#1a0636 40%,#4b0e5e 66%,#b3105a 88%,#ff6f3c 100%)}
-.sun{position:fixed;z-index:-2;left:50%;bottom:14vh;width:min(46vw,460px);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;
- background:linear-gradient(180deg,var(--yellow) 0%,var(--orange) 40%,var(--pink) 80%);opacity:.55;filter:blur(.3px);
- -webkit-mask:repeating-linear-gradient(180deg,#000 0 14px,transparent 14px 18px);mask:repeating-linear-gradient(180deg,#000 0 14px,transparent 14px 18px);
- -webkit-mask-size:100% 55%;mask-size:100% 55%;-webkit-mask-position:bottom;mask-position:bottom;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
- box-shadow:0 0 120px 20px rgba(255,46,151,.35)}
-.floor{position:fixed;z-index:-1;left:-50%;right:-50%;bottom:0;height:34vh;transform-origin:50% 100%;transform:perspective(380px) rotateX(58deg);
- background:repeating-linear-gradient(90deg,rgba(0,240,255,.45) 0 2px,transparent 2px 70px),repeating-linear-gradient(0deg,rgba(255,46,151,.5) 0 2px,transparent 2px 46px),linear-gradient(180deg,rgba(10,4,20,.9),rgba(10,4,20,.1))}
-main{max-width:1180px;margin:0 auto;padding:28px 18px 80px}
-h1{margin:0;font:900 clamp(26px,5vw,52px)/1.05 Impact,"Arial Black",system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;
- background:linear-gradient(90deg,var(--pink),var(--orange) 55%,var(--yellow));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 14px rgba(255,46,151,.7))}
-.meta{display:flex;flex-wrap:wrap;gap:8px 18px;margin:14px 0 22px;color:var(--muted);font-size:13px}
-.meta b{color:var(--text);font-weight:600}
-.meta a{color:var(--cyan);text-decoration:none;border-bottom:1px dashed rgba(0,240,255,.55);text-shadow:0 0 8px rgba(0,240,255,.5)}
-.meta a:hover{border-bottom-style:solid}
-.banner{display:flex;align-items:center;gap:16px;padding:16px 22px;margin-bottom:18px;border:1px solid;border-radius:14px;background:var(--panel);backdrop-filter:blur(6px)}
-.banner .big{font:900 clamp(22px,3.4vw,34px)/1 Impact,"Arial Black",sans-serif;letter-spacing:.08em;text-transform:uppercase}
-.banner.ok{border-color:var(--green);box-shadow:0 0 28px rgba(45,255,154,.25),inset 0 0 22px rgba(45,255,154,.08)}.banner.ok .big{color:var(--green);text-shadow:0 0 18px var(--green)}
-.banner.bad{border-color:var(--pink);box-shadow:0 0 34px rgba(255,46,151,.4),inset 0 0 24px rgba(255,46,151,.1)}.banner.bad .big{color:var(--pink);text-shadow:0 0 20px var(--pink);animation:flick 3.2s infinite}
-.banner .hint{color:var(--muted);font-size:14px}
-@keyframes flick{0%,92%,100%{opacity:1}93%{opacity:.55}94%{opacity:1}96%{opacity:.7}}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
-.card{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);backdrop-filter:blur(6px)}
-.card .n{font:900 38px/1 Impact,"Arial Black",sans-serif;letter-spacing:.04em}
-.card .l{color:var(--muted);font-size:12px;letter-spacing:.22em;text-transform:uppercase}
-.card.pass .n{color:var(--green);text-shadow:0 0 16px var(--green)}.card.fail .n{color:var(--pink);text-shadow:0 0 16px var(--pink)}
-.card.flaky .n{color:var(--yellow);text-shadow:0 0 16px var(--yellow)}.card.skip .n{color:var(--muted)}.card.total .n{color:var(--cyan);text-shadow:0 0 16px var(--cyan)}
-.bar{display:flex;height:10px;border-radius:99px;overflow:hidden;margin-bottom:20px;background:rgba(255,255,255,.08)}
-.bar i{display:block;height:100%}
-.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
-.pill{cursor:pointer;border:1px solid var(--line);background:rgba(22,9,42,.7);color:var(--text);padding:7px 14px;border-radius:99px;font:600 12px/1 inherit;letter-spacing:.14em;text-transform:uppercase}
-.pill:hover{border-color:var(--cyan);box-shadow:0 0 14px rgba(0,240,255,.35)}
-.pill.on{border-color:var(--pink);color:#fff;background:linear-gradient(90deg,rgba(255,46,151,.55),rgba(157,77,255,.45));box-shadow:0 0 16px rgba(255,46,151,.5)}
-.search{flex:1;min-width:200px;padding:8px 14px;border-radius:99px;border:1px solid var(--line);background:rgba(10,4,20,.7);color:var(--text);font:inherit}
-.search:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 14px rgba(0,240,255,.4)}
-h2{margin:26px 0 10px;font:800 15px/1 inherit;letter-spacing:.3em;text-transform:uppercase;color:var(--cyan);text-shadow:0 0 10px rgba(0,240,255,.6)}
-.test{margin-bottom:12px;border:1px solid var(--line);border-left-width:5px;border-radius:12px;background:var(--panel);backdrop-filter:blur(6px);overflow:hidden}
-.test.failed{border-color:var(--pink);box-shadow:0 0 24px rgba(255,46,151,.28)}.test.flaky{border-color:var(--yellow)}.test.passed{border-left-color:var(--green)}.test.skipped{border-left-color:var(--muted)}
-.test>summary{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 16px;cursor:pointer;list-style:none}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.top{background:var(--hdr-bg);color:var(--hdr-text);border-bottom:1px solid var(--line)}
+.top .in{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;flex-wrap:wrap;gap:6px 24px;align-items:center}
+h1{margin:0;font-size:18px;font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:2px 18px;font-size:13px;opacity:.9}
+.meta b{font-weight:600}
+.meta a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.themes{margin-left:auto;display:flex;gap:2px;border:1px solid var(--line);border-radius:var(--radius);padding:2px}
+.themes button{cursor:pointer;border:0;background:transparent;color:inherit;opacity:.75;padding:3px 10px;border-radius:calc(var(--radius) - 2px);font:inherit;font-size:12px}
+.themes button.on{background:var(--accent);color:#fff;opacity:1}
+main{max-width:1180px;margin:0 auto;padding:20px 20px 60px}
+.banner{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px;padding:12px 16px;margin-bottom:16px;border:1px solid var(--line);border-left-width:4px;border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+.banner .big{font-size:16px;font-weight:600}
+.banner.ok{border-left-color:var(--green)}.banner.ok .big{color:var(--green)}
+.banner.bad{border-left-color:var(--red)}.banner.bad .big{color:var(--red)}
+.banner .hint{color:var(--muted)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-bottom:16px}
+.chart{display:flex;align-items:center;gap:18px;padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+.donut{width:104px;height:104px;flex:none}
+.donut .dn{font-size:8px;font-weight:600;fill:var(--text)}
+.chart h3{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.chart ul{list-style:none;margin:0;padding:0;font-size:13px}
+.chart li{display:flex;align-items:center;gap:8px;margin:2px 0}
+.chart li i{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}
+.chart li b{margin-left:auto;padding-left:14px;font-variant-numeric:tabular-nums}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.pill{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:5px 12px;border-radius:99px;font:inherit;font-size:13px;text-transform:capitalize}
+.pill:hover{border-color:var(--accent)}
+.pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.search{flex:1;min-width:200px;padding:6px 12px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit}
+.search:focus,.themes button:focus-visible,.pill:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.test{margin-bottom:8px;border:1px solid var(--line);border-left-width:4px;border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow);overflow:hidden}
+.test.failed{border-left-color:var(--red)}.test.flaky{border-left-color:var(--amber)}.test.passed{border-left-color:var(--green)}.test.skipped{border-left-color:var(--gray)}
+.test>summary{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:10px 14px;cursor:pointer;list-style:none}
 .test>summary::-webkit-details-marker{display:none}
-.badge{min-width:64px;text-align:center;padding:4px 10px;border-radius:6px;font:900 12px/1.3 inherit;letter-spacing:.18em;text-transform:uppercase}
-.badge.passed{color:#04140c;background:var(--green);box-shadow:0 0 14px rgba(45,255,154,.6)}
-.badge.failed{color:#fff;background:var(--pink);box-shadow:0 0 16px rgba(255,46,151,.8)}
-.badge.flaky{color:#241a00;background:var(--yellow);box-shadow:0 0 14px rgba(255,225,77,.6)}
-.badge.skipped{color:#fff;background:#5b4a78}
+.test>summary:hover{background:var(--panel2)}
+.badge{min-width:54px;text-align:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;letter-spacing:.06em}
+.badge.passed{background:var(--green-bg);color:var(--green)}.badge.failed{background:var(--red-bg);color:var(--red)}.badge.flaky{background:var(--amber-bg);color:var(--amber)}.badge.skipped{background:var(--gray-bg);color:var(--gray)}
 .ttl{flex:1;min-width:220px}.ttl small{display:block;color:var(--muted);font-size:12px}
-.dur{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
-.chip{padding:3px 10px;border-radius:99px;font:800 11px/1.4 inherit;letter-spacing:.12em;text-transform:uppercase;border:1px solid}
-.chip.APP_BUG{color:var(--pink);border-color:var(--pink);text-shadow:0 0 8px var(--pink)}.chip.TEST{color:var(--purple);border-color:var(--purple)}
-.chip.ENV{color:var(--orange);border-color:var(--orange)}.chip.FLAKY{color:var(--yellow);border-color:var(--yellow)}
-.chip.CHECK{color:var(--cyan);border-color:var(--cyan)}.chip.UNKNOWN{color:var(--muted);border-color:var(--muted)}
-.body{padding:4px 16px 18px;border-top:1px solid rgba(255,46,151,.2)}
-.at{margin:14px 0;padding:14px 16px;border-radius:10px;border:1px solid var(--pink);background:linear-gradient(90deg,rgba(255,46,151,.22),rgba(157,77,255,.12));box-shadow:0 0 22px rgba(255,46,151,.3)}
-.at .k{font:900 11px/1 inherit;letter-spacing:.3em;color:var(--pink);text-transform:uppercase;text-shadow:0 0 8px var(--pink)}
-.at .path{margin-top:8px;font-size:16px;font-weight:600}.at .path span{color:var(--muted);margin:0 6px}.at .path b{color:#fff;text-shadow:0 0 10px var(--pink)}
-.at .loc{margin-top:8px;color:var(--muted);font:12px/1.5 ui-monospace,Consolas,monospace}
-.diag{margin:14px 0;padding:14px 16px;border-radius:10px;border:1px solid var(--cyan);background:rgba(0,240,255,.07)}
-.diag .k{font:900 11px/1 inherit;letter-spacing:.3em;color:var(--cyan);text-transform:uppercase}
-.diag h4{margin:8px 0 4px;font-size:16px}.diag p{margin:4px 0 8px;color:var(--text)}.diag ul{margin:6px 0 0;padding-left:20px;color:var(--text)}.diag li{margin:3px 0}
-.diff{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:8px 0;font:13px/1.45 ui-monospace,Consolas,monospace}
-.diff .e{color:var(--green)}.diff .r{color:var(--pink)}.diff .v{word-break:break-word}
-.steps{margin:14px 0}.steps .k{font:900 11px/1 inherit;letter-spacing:.3em;color:var(--purple);text-transform:uppercase;margin-bottom:8px}
-.steps ol{list-style:none;margin:0;padding-left:0}.steps ol ol{padding-left:22px;border-left:1px dashed rgba(157,77,255,.4);margin-left:8px}
-.st{display:flex;gap:10px;align-items:baseline;padding:4px 8px;border-radius:6px}
-.st .ic{width:16px;text-align:center;font-weight:900}.st .ms{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.dur{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{padding:1px 9px;border-radius:99px;font-size:11px;font-weight:600;border:1px solid}
+.chip.APP_BUG{color:var(--red);border-color:var(--red)}.chip.TEST,.chip.CHECK{color:var(--accent);border-color:var(--accent)}
+.chip.ENV,.chip.FLAKY{color:var(--amber);border-color:var(--amber)}.chip.UNKNOWN{color:var(--gray);border-color:var(--gray)}
+.body{padding:2px 16px 16px;border-top:1px solid var(--line)}
+.at{margin:14px 0;padding:12px 14px;border-radius:var(--radius);border:1px solid var(--red);border-left-width:4px;background:var(--red-bg)}
+.at .k{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--red);text-transform:uppercase}
+.at .path{margin-top:6px;font-size:14px;font-weight:600}.at .path span{color:var(--muted);margin:0 6px;font-weight:400}.at .path b{font-weight:700}
+.at .loc{margin-top:6px;color:var(--muted);font:12px/1.5 ui-monospace,Consolas,monospace}
+.diag{margin:12px 0;padding:12px 14px;border-radius:var(--radius);border:1px solid var(--line);border-left:4px solid var(--accent);background:var(--panel2)}
+.diag .k{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
+.diag h4{margin:6px 0 2px;font-size:14px}.diag p{margin:2px 0 8px}.diag ul{margin:6px 0 0;padding-left:20px}.diag li{margin:2px 0}
+.diff{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:6px 0;font:12px/1.45 ui-monospace,Consolas,monospace}
+.diff .e{color:var(--green)}.diff .r{color:var(--red)}.diff .v{word-break:break-word}
+.steps{margin:12px 0}.steps .k,.ev .k{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-bottom:6px}
+.steps ol{list-style:none;margin:0;padding-left:0}.steps ol ol{padding-left:20px;border-left:1px solid var(--line);margin-left:8px}
+.st{display:flex;gap:8px;align-items:baseline;padding:3px 8px;border-radius:4px}
+.st .ic{width:16px;text-align:center;font-weight:700}.st .ms{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
 .st.ok .ic{color:var(--green)}.st.hook{color:var(--muted)}
-.st.bad{background:linear-gradient(90deg,rgba(255,46,151,.35),transparent);box-shadow:inset 3px 0 0 var(--pink)}
-.st.bad .ic{color:var(--pink);text-shadow:0 0 8px var(--pink)}
-.st.here{box-shadow:inset 3px 0 0 var(--pink),0 0 18px rgba(255,46,151,.45);color:#fff;font-weight:600}
-.st.here::after{content:"\\25C0  FAILED HERE";margin-left:10px;color:var(--pink);font:900 11px/1 inherit;letter-spacing:.2em;text-shadow:0 0 8px var(--pink);animation:blink 1.1s infinite}
-@keyframes blink{50%{opacity:.35}}
-.ev{margin:14px 0}.ev .k{font:900 11px/1 inherit;letter-spacing:.3em;color:var(--orange);text-transform:uppercase;margin-bottom:8px}
+.st.bad{background:var(--red-bg)}.st.bad .ic{color:var(--red)}
+.st.here{font-weight:600;box-shadow:inset 3px 0 0 var(--red)}
+.st.here::after{content:"◀ failed here";margin-left:8px;color:var(--red);font-size:11px;font-weight:700}
+.ev{margin:12px 0}
 .evg{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;align-items:start}
 .evg figure{margin:0}.evg figcaption{font-size:12px;color:var(--muted);margin-top:4px}
-.evg img,.evg video{display:block;width:100%;border-radius:8px;border:1px solid var(--line);background:#000;cursor:zoom-in}
+.evg img,.evg video{display:block;width:100%;border-radius:var(--radius);border:1px solid var(--line);background:#000;cursor:zoom-in}
 .evg video{cursor:default}.vid{grid-column:1/-1}.vid video{max-height:520px}
-.tools2{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.btn{cursor:pointer;border:1px solid var(--cyan);background:rgba(0,240,255,.08);color:var(--cyan);padding:6px 12px;border-radius:8px;font:700 12px/1 inherit;letter-spacing:.08em;text-decoration:none}
-.btn:hover{background:rgba(0,240,255,.2);box-shadow:0 0 14px rgba(0,240,255,.4)}
+.tools2{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.btn{cursor:pointer;border:1px solid var(--accent);background:transparent;color:var(--accent);padding:3px 10px;border-radius:var(--radius);font:inherit;font-size:12px;font-weight:600;text-decoration:none}
+.btn:hover{background:var(--accent);color:#fff}
 code,pre{font:12px/1.5 ui-monospace,Consolas,monospace}
-pre{white-space:pre-wrap;word-break:break-word;margin:8px 0 0;padding:12px;border-radius:8px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.08);color:#ffd5ea;max-height:340px;overflow:auto}
+pre{white-space:pre-wrap;word-break:break-word;margin:6px 0 0;padding:10px 12px;border-radius:var(--radius);background:var(--panel2);border:1px solid var(--line);max-height:340px;overflow:auto}
 details.raw>summary{cursor:pointer;color:var(--muted);font-size:13px}
-.foot{margin-top:40px;text-align:center;color:var(--muted);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
+.foot{margin-top:32px;text-align:center;color:var(--muted);font-size:12px}
 .empty{padding:24px;text-align:center;color:var(--muted)}
-#lightbox{position:fixed;inset:0;z-index:50;background:rgba(5,2,12,.92);display:flex;align-items:center;justify-content:center;cursor:zoom-out}
-#lightbox[hidden]{display:none}#lightbox img{max-width:94vw;max-height:94vh;border:1px solid var(--pink);box-shadow:0 0 40px rgba(255,46,151,.5)}
-.call{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:rgba(10,4,20,.5)}
+#lightbox{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+#lightbox[hidden]{display:none}#lightbox img{max-width:94vw;max-height:94vh;border-radius:4px}
+.call{margin:6px 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel2)}
 .call>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:8px 12px}
 .call>summary::-webkit-details-marker{display:none}
 .call .u{flex:1;min-width:200px;font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--muted);word-break:break-all}
-.call .cb{padding:0 12px 12px}.k2{margin:8px 0 2px;font:800 11px/1 inherit;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
-.chip.s2{color:var(--green);border-color:var(--green)}.chip.s3{color:var(--cyan);border-color:var(--cyan)}.chip.s4{color:var(--orange);border-color:var(--orange)}.chip.s5{color:var(--red);border-color:var(--red)}
-.note{margin:14px 0;padding:10px 14px;border-radius:8px;border:1px dashed var(--line);color:var(--muted);font-size:13px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
+.call .cb{padding:0 12px 12px}.k2{margin:8px 0 2px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.chip.s2{color:var(--green);border-color:var(--green)}.chip.s3{color:var(--accent);border-color:var(--accent)}.chip.s4{color:var(--amber);border-color:var(--amber)}.chip.s5{color:var(--red);border-color:var(--red)}
+.note{margin:12px 0;padding:10px 14px;border-radius:var(--radius);border:1px dashed var(--line);color:var(--muted);font-size:13px}
 `;
 
 const JS = `
@@ -637,23 +651,53 @@ function card(t){
   return h+'</div></details>';
 }
 
+var kinds=[['passed','Passed','var(--green)'],['failed','Failed','var(--red)'],['flaky','Flaky','var(--amber)'],['skipped','Skipped','var(--gray)']];
+function donut(title,totalN,counts){
+  var r=15.9155,acc=0;
+  var svg='<svg viewBox="0 0 42 42" class="donut" role="img" aria-label="'+esc(title)+'"><circle cx="21" cy="21" r="'+r+'" fill="none" style="stroke:var(--gray-bg)" stroke-width="5"/>';
+  kinds.forEach(function(k){
+    var n=counts[k[0]]||0;if(!n||!totalN)return;
+    var p=n/totalN*100;
+    svg+='<circle cx="21" cy="21" r="'+r+'" fill="none" style="stroke:'+k[2]+'" stroke-width="5" pathLength="100" stroke-dasharray="'+p+' '+(100-p)+'" stroke-dashoffset="'+(25-acc)+'"/>';
+    acc+=p;
+  });
+  svg+='<text x="21" y="23.5" text-anchor="middle" class="dn">'+totalN+'</text></svg>';
+  var li=kinds.filter(function(k){return k[0]==='passed'||k[0]==='failed'||(counts[k[0]]||0)>0}).map(function(k){return '<li><i style="background:'+k[2]+'"></i>'+k[1]+'<b>'+(counts[k[0]]||0)+'</b></li>'}).join('');
+  return '<div class="chart">'+svg+'<div><h3>'+esc(title)+'</h3><ul>'+li+'</ul></div></div>';
+}
+var specStat={};
+D.tests.forEach(function(t){var s=specStat[t.file]||(specStat[t.file]={failed:0,flaky:0,passed:0});if(t.status==='failed')s.failed++;else if(t.status==='flaky')s.flaky++;else if(t.status==='passed')s.passed++});
+var specCounts={passed:0,failed:0,flaky:0,skipped:0};
+Object.keys(specStat).forEach(function(f){var s=specStat[f];specCounts[s.failed?'failed':s.flaky?'flaky':s.passed?'passed':'skipped']++});
+var stepTotal=0,stepFailed=0;
+function walkSteps(list){list.forEach(function(s){if(!s.hook){stepTotal++;if(s.failed&&!s.children.some(function(x){return x.failed}))stepFailed++}walkSteps(s.children)})}
+D.tests.forEach(function(t){walkSteps(t.steps)});
+
 var banner=c.failed>0
  ?'<div class="banner bad"><span class="big">'+c.failed+' test'+(c.failed>1?'s':'')+' failed</span><span class="hint">Failures are listed first. Each one points at the failing step and suggests where the problem is.</span></div>'
  :c.flaky>0
- ?'<div class="banner ok"><span class="big">All passed \\u2014 '+c.flaky+' flaky</span><span class="hint">Flaky tests failed at first and passed on retry.</span></div>'
- :'<div class="banner ok"><span class="big">All systems go</span><span class="hint">Every test passed.</span></div>';
+ ?'<div class="banner ok"><span class="big">All passed, '+c.flaky+' flaky</span><span class="hint">Flaky tests failed at first and passed on retry.</span></div>'
+ :'<div class="banner ok"><span class="big">All tests passed</span></div>';
 
-var pct=function(n){return total?(n/total*100).toFixed(2)+'%':'0%'};
 var started=new Date(D.startedAt);
-var meta='<span>Started <b>'+esc(started.toLocaleString())+'</b></span><span>Duration <b>'+fmt(D.durationMs)+'</b></span>'+(String(D.baseURL).indexOf('http')===0?'<span>Project <b><a href="'+esc(D.baseURL)+'" target="_blank" rel="noopener">'+esc(D.baseURL)+'</a></b></span>':'')+(D.evidenceMode?'<span><b>EVIDENCE MODE</b></span>':'')+(D.ci?'<span>CI run <b>#'+esc(D.ci.run)+'</b> \\u00b7 '+esc(D.ci.branch)+' \\u00b7 '+esc(D.ci.trigger)+(D.ci.sha?' \\u00b7 '+esc(D.ci.sha):'')+'</span>':'');
+var meta='<span>Started <b>'+esc(started.toLocaleString())+'</b></span><span>Duration <b>'+fmt(D.durationMs)+'</b></span>'+(String(D.baseURL).indexOf('http')===0?'<span>Project <b><a href="'+esc(D.baseURL)+'" target="_blank" rel="noopener">'+esc(D.baseURL)+'</a></b></span>':'')+(D.evidenceMode?'<span><b>Evidence mode</b></span>':'')+(D.ci?'<span>CI run <b>#'+esc(D.ci.run)+'</b> '+esc(D.ci.branch)+', '+esc(D.ci.trigger)+(D.ci.sha?', '+esc(D.ci.sha):'')+'</span>':'');
+var themes=[['light','Light'],['dark','Dark'],['corporate','Corporate']];
+var root=document.documentElement;
+try{var savedTheme=localStorage.getItem('tracker-theme');if(savedTheme&&themes.some(function(x){return x[0]===savedTheme}))root.setAttribute('data-theme',savedTheme)}catch(e){}
+var switcher='<div class="themes">'+themes.map(function(x){return '<button type="button" data-theme-btn="'+x[0]+'"'+(root.getAttribute('data-theme')===x[0]?' class="on"':'')+'>'+x[1]+'</button>'}).join('')+'</div>';
+document.getElementById('top').innerHTML='<h1>'+esc(D.title)+'</h1><div class="meta">'+meta+'</div>'+switcher;
+document.querySelectorAll('[data-theme-btn]').forEach(function(b){b.addEventListener('click',function(){
+  root.setAttribute('data-theme',b.dataset.themeBtn);
+  document.querySelectorAll('[data-theme-btn]').forEach(function(x){x.classList.toggle('on',x===b)});
+  try{localStorage.setItem('tracker-theme',b.dataset.themeBtn)}catch(e){}
+})});
 
-var html='<h1>'+esc(D.title)+'</h1><div class="meta">'+meta+'</div>'+banner;
-html+='<div class="cards"><div class="card total"><div class="n">'+total+'</div><div class="l">Total</div></div><div class="card pass"><div class="n">'+c.passed+'</div><div class="l">Passed</div></div><div class="card fail"><div class="n">'+c.failed+'</div><div class="l">Failed</div></div><div class="card flaky"><div class="n">'+c.flaky+'</div><div class="l">Flaky</div></div><div class="card skip"><div class="n">'+c.skipped+'</div><div class="l">Skipped</div></div></div>';
-html+='<div class="bar"><i style="width:'+pct(c.passed)+';background:var(--green);box-shadow:0 0 12px var(--green)"></i><i style="width:'+pct(c.flaky)+';background:var(--yellow)"></i><i style="width:'+pct(c.failed)+';background:var(--pink);box-shadow:0 0 12px var(--pink)"></i><i style="width:'+pct(c.skipped)+';background:#5b4a78"></i></div>';
-html+='<div class="tools">'+['all','failed','flaky','passed','skipped'].map(function(f){var n=f==='all'?total:c[f];return '<button class="pill'+(f==='all'?' on':'')+'" data-filter="'+f+'">'+f+' '+n+'</button>'}).join('')+'<input class="search" type="search" placeholder="Search tests, files\\u2026  ( / )" aria-label="Search tests"></div>';
+var html=banner;
+html+='<div class="charts">'+donut('Specs',Object.keys(specStat).length,specCounts)+donut('Tests',total,c)+donut('Steps',stepTotal,{passed:stepTotal-stepFailed,failed:stepFailed})+'</div>';
+html+='<div class="tools">'+['all','failed','flaky','passed','skipped'].map(function(f){var n=f==='all'?total:c[f];return '<button class="pill'+(f==='all'?' on':'')+'" data-filter="'+f+'">'+f+' '+n+'</button>'}).join('')+'<input class="search" type="search" placeholder="Search tests and files ( / )" aria-label="Search tests"></div>';
 html+='<div id="list">'+D.tests.map(card).join('')+'</div>';
 if(!D.tests.length)html+='<div class="empty">No tests in this run.</div>';
-html+='<div class="foot">Keys: N / P next / previous failure \\u00b7 / search \\u00b7 click a screenshot to enlarge</div>';
+html+='<div class="foot">Keys: N / P next / previous failure, / search, click a screenshot to enlarge</div>';
 app.innerHTML=html;
 
 var filter='all',query='';

@@ -1,4 +1,4 @@
-// Opens the last neon tracker report in the default browser: npm run report:tracker
+// Opens the last test report in the default browser: npm run report:tracker
 const { spawn } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const { resolve } = require('node:path');
